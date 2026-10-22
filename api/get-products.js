@@ -10,21 +10,33 @@ export default async function handler(req, res) {
   }
 
   try {
-    let products = [];
+    // 1. 抓取 A 表 (主商品表) 所有未結單的商品
+    let aProducts = [];
+    const aMapById = {};
+    const aMapByName = {};
 
-    // 1. 先建立 A 表的對照字典（以防 C 表是用 Relation 關聯）
-    const productMap = {};
     if (PRODUCT_DB_ID) {
       try {
-        const aResponse = await notion.databases.query({
-          database_id: PRODUCT_DB_ID,
-        });
+        const aResponse = await notion.databases.query({ database_id: PRODUCT_DB_ID });
         aResponse.results.forEach((page) => {
           const p = page.properties;
+          
+          // 檢查 A 表狀態是否為已結單
+          const statusProp = p['狀態'] || p['Status'];
+          const statusName = statusProp?.status?.name || statusProp?.select?.name || '';
+          if (statusName === '已結單') return;
+
           const nameProp = p['商品名稱'] || p['名稱'] || p['Name'];
           const name = nameProp?.title?.[0]?.plain_text || nameProp?.rich_text?.[0]?.plain_text || '';
+          
+          const priceProp = p['單價'] || p['價格'] || p['Price'];
+          const price = priceProp?.number || 0;
+
           if (name) {
-            productMap[page.id] = name;
+            const item = { id: page.id, name, price };
+            aProducts.push(item);
+            aMapById[page.id] = item;
+            aMapByName[name] = item;
           }
         });
       } catch (err) {
@@ -32,34 +44,22 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. 嘗試從 C 表 (款式細項表) 抓取資料
+    // 2. 抓取 C 表 (款式細項表) 所有未結單的款式
+    let cDetails = [];
     if (PRODUCT_DETAIL_DB_ID) {
       try {
-        const cResponse = await notion.databases.query({
-          database_id: PRODUCT_DETAIL_DB_ID,
-        });
-
-        products = cResponse.results.map((page) => {
+        const cResponse = await notion.databases.query({ database_id: PRODUCT_DETAIL_DB_ID });
+        cResponse.results.forEach((page) => {
           const p = page.properties;
+
+          // 檢查 C 表狀態是否為已結單
+          const statusProp = p['狀態'] || p['Status'];
+          const statusName = statusProp?.status?.name || statusProp?.select?.name || '';
+          if (statusName === '已結單') return;
 
           // 款式名稱
           const titleProp = p['款式名稱'] || p['名稱'] || p['Name'];
           const styleName = titleProp?.title?.[0]?.plain_text || titleProp?.rich_text?.[0]?.plain_text || '標準款式';
-
-          // 商品名稱 (支援 Relation 或一般文字)
-          const prodNameProp = p['商品名稱'] || p['商品'];
-          let productName = '未分類商品';
-          
-          if (prodNameProp && prodNameProp.type === 'relation' && prodNameProp.relation.length > 0) {
-            const relatedId = prodNameProp.relation[0].id;
-            if (productMap[relatedId]) {
-              productName = productMap[relatedId];
-            }
-          } else if (prodNameProp) {
-            if (prodNameProp.type === 'select') productName = prodNameProp.select?.name || '未分類商品';
-            else if (prodNameProp.type === 'rich_text') productName = prodNameProp.rich_text?.[0]?.plain_text || '未分類商品';
-            else if (prodNameProp.type === 'title') productName = prodNameProp.title?.[0]?.plain_text || '未分類商品';
-          }
 
           // 單價
           const priceProp = p['單價'] || p['價格'] || p['Price'];
@@ -73,48 +73,62 @@ export default async function handler(req, res) {
             imageUrl = fileObj.file?.url || fileObj.external?.url || '';
           }
 
-          return {
-            id: page.id,
-            productName: productName,
-            styleName: styleName,
-            price: price,
-            imageUrl: imageUrl,
-          };
+          // 對應到 A 表的名稱或 ID
+          let parentProductName = '';
+          let matchedAId = null;
+
+          const prodNameProp = p['商品名稱'] || p['商品'];
+          if (prodNameProp && prodNameProp.type === 'relation' && prodNameProp.relation.length > 0) {
+            matchedAId = prodNameProp.relation[0].id;
+            if (aMapById[matchedAId]) {
+              parentProductName = aMapById[matchedAId].name;
+            }
+          } else if (prodNameProp) {
+            if (prodNameProp.type === 'select') parentProductName = prodNameProp.select?.name || '';
+            else if (prodNameProp.type === 'rich_text') parentProductName = prodNameProp.rich_text?.[0]?.plain_text || '';
+            else if (prodNameProp.type === 'title') parentProductName = prodNameProp.title?.[0]?.plain_text || '';
+          }
+
+          if (parentProductName) {
+            cDetails.push({
+              id: page.id,
+              productName: parentProductName,
+              matchedAId: matchedAId,
+              styleName,
+              price: price > 0 ? price : (aMapByName[parentProductName]?.price || 0),
+              imageUrl
+            });
+          }
         });
       } catch (err) {
-        console.log('C表讀取失敗，將改抓A表', err.message);
+        console.log('C表讀取失敗:', err.message);
       }
     }
 
-    // 3. 如果 C 表沒有資料，直接改抓 A 表作為備援（無圖片，款式直接使用主商品名或空白）
-    if (products.length === 0 && PRODUCT_DB_ID) {
-      try {
-        const aResponse = await notion.databases.query({
-          database_id: PRODUCT_DB_ID,
+    // 3. 整合 A 表與 C 表：
+    // 每一項 A 表商品如果能在 C 表找到對應細項，就展現 C 表的圖片與款式；
+    // 如果在 C 表找不到細項，就直接把 A 表本身當作一個品項（無圖片，帶 A 表價格）。
+    let finalProducts = [];
+    const matchedAIds = new Set(cDetails.map(c => c.matchedAId).filter(Boolean));
+    const matchedANames = new Set(cDetails.map(c => c.productName));
+
+    aProducts.forEach(aItem => {
+      const hasCDetails = matchedAIds.has(aItem.id) || matchedANames.has(aItem.name);
+      if (hasCDetails) {
+        const styles = cDetails.filter(c => c.matchedAId === aItem.id || c.productName === aItem.name);
+        finalProducts.push(...styles);
+      } else {
+        finalProducts.push({
+          id: aItem.id,
+          productName: aItem.name,
+          styleName: '標準款式',
+          price: aItem.price,
+          imageUrl: '' // 無圖片
         });
-
-        products = aResponse.results.map((page) => {
-          const p = page.properties;
-          const nameProp = p['商品名稱'] || p['名稱'] || p['Name'];
-          const name = nameProp?.title?.[0]?.plain_text || nameProp?.rich_text?.[0]?.plain_text || '未命名商品';
-
-          const priceProp = p['單價'] || p['價格'] || p['Price'];
-          const price = priceProp?.number || 0;
-
-          return {
-            id: page.id,
-            productName: name,
-            styleName: '標準款式', // 不顯示多餘狀態
-            price: price,
-            imageUrl: '', // 無圖片
-          };
-        });
-      } catch (err) {
-        console.error('A表備援讀取也失敗:', err.message);
       }
-    }
+    });
 
-    return res.status(200).json({ success: true, products });
+    return res.status(200).json({ success: true, products: finalProducts });
   } catch (error) {
     console.error('Notion API Error:', error);
     return res.status(500).json({ success: false, error: error.message });
