@@ -37,7 +37,7 @@ module.exports = async (req, res) => {
       const strVal = String(val !== undefined && val !== null ? val : '');
 
       if (propType === 'title') {
-        properties[propKey] = { title: [{ text: { content: strVal } }] };
+        properties[propKey] = { title: [{ text: { content: strVal || '未命名訂單' } }] };
       } else if (propType === 'rich_text') {
         properties[propKey] = { rich_text: [{ text: { content: strVal } }] };
       } else if (propType === 'select') {
@@ -50,7 +50,7 @@ module.exports = async (req, res) => {
     };
 
     // 2. 對應欄位
-    setProp(['訂單', '訂單名稱', '暱稱', 'LINE社群暱稱', 'Name', 'Title'], nickname);
+    setProp(['訂單', '訂單名稱', '暱稱', '買家暱稱', 'LINE社群暱稱', 'Name', 'Title'], nickname || '未命名買家');
     setProp(['聯絡管道', '聯絡方式', '聯絡型態', '管道'], contactType);
     setProp(['聯絡資訊', '聯絡帳號', 'LINE ID/IG', '帳號', '聯絡內容'], contactInfo);
     setProp(['商品名稱', '商品', '品項', '預購商品', 'Product'], product);
@@ -60,6 +60,12 @@ module.exports = async (req, res) => {
     setProp(['總金額', '總價', '合計', 'Total Price', '金額'], totalPrice);
     setProp(['取貨方式', '寄送方式', '物流', 'Delivery'], delivery);
     setProp(['狀態', '訂單狀態', 'Status'], '待處理');
+
+    // 🛡️ 安全機制：如果自動對應沒找到 Title 欄位，手動強制把資料庫第一個 Title 欄位填上，避免 Notion 報錯
+    const titleKey = Object.keys(propsSchema).find(k => propsSchema[k].type === 'title');
+    if (titleKey && !properties[titleKey]) {
+      properties[titleKey] = { title: [{ text: { content: nickname || '未命名訂單' } }] };
+    }
 
     // 3. 寫入 Notion
     await notion.pages.create({
