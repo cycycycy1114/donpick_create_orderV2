@@ -3,7 +3,6 @@ import { Client } from '@notionhq/client';
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
 export default async function handler(req, res) {
-  // 強制設定 Content-Type 為 JSON，防止 Vercel 回傳純文字 HTML 頁面
   res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (req.method !== 'POST') {
@@ -18,15 +17,15 @@ export default async function handler(req, res) {
       return res.status(500).json({ success: false, error: "缺少 DATABASE_ID 環境變數" });
     }
 
-    // 建立寫入 Notion B 表的屬性對應
+    // 🌟 請把左側的引號名稱（例如 "Name", "聯絡方式" 等）改成你 Notion B 表實際建立的欄位名稱！
     const properties = {
-      // 1. 買家暱稱 (Title 欄位)
-      "買家暱稱": {
+      // 1. 第一欄標題 (Title)，通常是買家暱稱或訂單名稱
+      "Name": {
         title: [{ text: { content: nickname || '未命名買家' } }]
       },
-      // 2. 聯絡管道
+      // 2. 聯絡管道 (如果是 Select 選單就用 select，若是文字就改 rich_text)
       "聯絡管道": {
-        rich_text: [{ text: { content: contactType || '' } }]
+        select: { name: contactType || 'Line' }
       },
       // 3. 聯絡資訊
       "聯絡資訊": {
@@ -56,7 +55,7 @@ export default async function handler(req, res) {
       "取貨方式": {
         select: { name: delivery || '7-11 店到店' }
       },
-      // 10. 狀態
+      // 10. 狀態 (若 Notion 是 status 型態用 status，若是 select 用 select)
       "狀態": {
         status: { name: '待處理' }
       }
