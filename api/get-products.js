@@ -10,7 +10,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    // 1. 抓取 A 表 (主商品表) 所有未結單的商品
+    const excludedStatuses = ['已結單', '已結束'];
+
+    // 1. 抓取 A 表 (主商品表) - 以 A 表的狀態為主來判斷是否「已結束」或「已結單」
     let aProducts = [];
     const aMapById = {};
     const aMapByName = {};
@@ -21,10 +23,10 @@ export default async function handler(req, res) {
         aResponse.results.forEach((page) => {
           const p = page.properties;
           
-          // 檢查 A 表狀態是否為已結單
+          // 檢查 A 表狀態：如果是已結單或已結束，直接略過不撈取
           const statusProp = p['狀態'] || p['Status'];
           const statusName = statusProp?.status?.name || statusProp?.select?.name || '';
-          if (statusName === '已結單') return;
+          if (excludedStatuses.includes(statusName)) return;
 
           const nameProp = p['商品名稱'] || p['名稱'] || p['Name'];
           const name = nameProp?.title?.[0]?.plain_text || nameProp?.rich_text?.[0]?.plain_text || '';
@@ -44,18 +46,13 @@ export default async function handler(req, res) {
       }
     }
 
-    // 2. 抓取 C 表 (款式細項表) 所有未結單的款式
+    // 2. 抓取 C 表 (款式細項表)
     let cDetails = [];
     if (PRODUCT_DETAIL_DB_ID) {
       try {
         const cResponse = await notion.databases.query({ database_id: PRODUCT_DETAIL_DB_ID });
         cResponse.results.forEach((page) => {
           const p = page.properties;
-
-          // 檢查 C 表狀態是否為已結單
-          const statusProp = p['狀態'] || p['Status'];
-          const statusName = statusProp?.status?.name || statusProp?.select?.name || '';
-          if (statusName === '已結單') return;
 
           // 款式名稱
           const titleProp = p['款式名稱'] || p['名稱'] || p['Name'];
@@ -89,7 +86,9 @@ export default async function handler(req, res) {
             else if (prodNameProp.type === 'title') parentProductName = prodNameProp.title?.[0]?.plain_text || '';
           }
 
-          if (parentProductName) {
+          // 核心邏輯：「已結束以 A 表為主」
+          // 只有當這個 C 表細項對應到的 A 表主商品存在且未被過濾（也就是 A表 是開放狀態），才允許撈進來
+          if (parentProductName && (aMapById[matchedAId] || aMapByName[parentProductName])) {
             cDetails.push({
               id: page.id,
               productName: parentProductName,
@@ -105,9 +104,7 @@ export default async function handler(req, res) {
       }
     }
 
-    // 3. 整合 A 表與 C 表：
-    // 每一項 A 表商品如果能在 C 表找到對應細項，就展現 C 表的圖片與款式；
-    // 如果在 C 表找不到細項，就直接把 A 表本身當作一個品項（無圖片，帶 A 表價格）。
+    // 3. 整合 A 表與 C 表
     let finalProducts = [];
     const matchedAIds = new Set(cDetails.map(c => c.matchedAId).filter(Boolean));
     const matchedANames = new Set(cDetails.map(c => c.productName));
