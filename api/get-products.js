@@ -14,7 +14,7 @@ export default async function handler(req, res) {
   try {
     const excludedStatuses = ['已結單', '已結束', '結束', '結單'];
 
-    // 1. 抓取 A 表 (主商品表) - 過濾已結單與已結束，並把 A 表的規格與價格記錄下來
+    // 1. 抓取 A 表 (主商品表)
     let aProducts = [];
     const aMapById = {};
     const aMapByName = {};
@@ -25,7 +25,6 @@ export default async function handler(req, res) {
         aResponse.results.forEach((page) => {
           const p = page.properties;
           
-          // 檢查 A 表狀態是否需要被排除
           const statusProp = p['狀態'] || p['Status'] || p['訂單狀態'];
           let statusName = '';
           if (statusProp) {
@@ -35,22 +34,29 @@ export default async function handler(req, res) {
           }
           statusName = statusName.trim();
 
-          if (excludedStatuses.some(ex => statusName.includes(ex))) {
-            return;
-          }
+          if (excludedStatuses.some(ex => statusName.includes(ex))) return;
 
           const nameProp = p['商品名稱'] || p['名稱'] || p['Name'];
           const name = nameProp?.title?.[0]?.plain_text || nameProp?.rich_text?.[0]?.plain_text || '';
           
-          // 讀取 A 表的規格欄位（備援用）
+          // 🌟 支援 A 表的 multi_select 規格選項
+          let specs = ['標準款式'];
           const specProp = p['規格'] || p['款式'] || p['Spec'];
-          const specName = specProp?.select?.name || specProp?.rich_text?.[0]?.plain_text || specProp?.title?.[0]?.plain_text || '標準款式';
+          if (specProp) {
+            if (specProp.type === 'multi_select' && specProp.multi_select?.length > 0) {
+              specs = specProp.multi_select.map(s => s.name);
+            } else if (specProp.type === 'select' && specProp.select?.name) {
+              specs = [specProp.select.name];
+            } else if (specProp.type === 'rich_text' && specProp.rich_text[0]?.plain_text) {
+              specs = [specProp.rich_text[0].plain_text];
+            }
+          }
 
           const priceProp = p['單價'] || p['價格'] || p['Price'];
           const price = priceProp?.number || 0;
 
           if (name) {
-            const item = { id: page.id, name, spec: specName, price };
+            const item = { id: page.id, name, specs, price };
             aProducts.push(item);
             aMapById[page.id] = item;
             aMapByName[name] = item;
@@ -69,20 +75,16 @@ export default async function handler(req, res) {
         cResponse.results.forEach((page) => {
           const p = page.properties;
 
-          // 檢查 C 表狀態是否需要被排除（選擇性防護）
           const statusProp = p['狀態'] || p['Status'];
           let statusName = statusProp?.status?.name || statusProp?.select?.name || '';
           if (excludedStatuses.some(ex => statusName.includes(ex))) return;
 
-          // 款式名稱
           const titleProp = p['款式名稱'] || p['名稱'] || p['Name'];
           const styleName = titleProp?.title?.[0]?.plain_text || titleProp?.rich_text?.[0]?.plain_text || '標準款式';
 
-          // 單價
           const priceProp = p['單價'] || p['價格'] || p['Price'];
           const price = priceProp?.number || 0;
 
-          // 款式圖片
           const imageProp = p['款式圖片'] || p['圖片'] || p['Files'];
           let imageUrl = '';
           if (imageProp?.files?.[0]) {
@@ -90,11 +92,10 @@ export default async function handler(req, res) {
             imageUrl = fileObj.file?.url || fileObj.external?.url || '';
           }
 
-          // 對應到 A 表的名稱或 ID
           let parentProductName = '';
           let matchedAId = null;
 
-          const prodNameProp = p['商品名稱'] || p['商品'];
+          const prodNameProp = p['商品名稱'] || p['商品'] || p['Product'] || p['主商品'];
           if (prodNameProp) {
             if (prodNameProp.type === 'relation' && prodNameProp.relation.length > 0) {
               matchedAId = prodNameProp.relation[0].id;
@@ -110,7 +111,6 @@ export default async function handler(req, res) {
             }
           }
 
-          // 只有當對應的 A 表主商品存在且未被排除時，才允許 C 表細項被撈出
           if (parentProductName && (aMapById[matchedAId] || aMapByName[parentProductName])) {
             cDetails.push({
               id: page.id,
@@ -135,17 +135,18 @@ export default async function handler(req, res) {
     aProducts.forEach(aItem => {
       const hasCDetails = matchedAIds.has(aItem.id) || matchedANames.has(aItem.name);
       if (hasCDetails) {
-        // 如果 C 表有細項，載入 C 表的款式與圖片
         const styles = cDetails.filter(c => c.matchedAId === aItem.id || c.productName === aItem.name);
         finalProducts.push(...styles);
       } else {
-        // 如果 C 表沒有細項，自動備援使用 A 表的規格與價格（無圖片）
-        finalProducts.push({
-          id: aItem.id,
-          productName: aItem.name,
-          styleName: aItem.spec, // 採用 A 表的規格
-          price: aItem.price,
-          imageUrl: '' // 無圖片
+        // 🌟 如果 C 表沒有細項，將 A 表的每個 multi_select 規格（如辣、不辣）分別建立一個選項（無圖片）
+        aItem.specs.forEach(specName => {
+          finalProducts.push({
+            id: aItem.id,
+            productName: aItem.name,
+            styleName: specName,
+            price: aItem.price,
+            imageUrl: ''
+          });
         });
       }
     });
