@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>DonPick 懂挑 | 預購下單表單</title>
+  <title>DonPick 懂挑 | 線上預購/現貨購物車</title>
   <style>
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
@@ -79,6 +79,38 @@
       border-radius: 6px;
       background: #eee;
     }
+    /* 購物車清單樣式 */
+    .cart-section {
+      background: #faf9f6;
+      border: 1px dashed #d0cce1;
+      border-radius: 8px;
+      padding: 12px;
+      margin: 18px 0;
+    }
+    .cart-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      padding: 6px 0;
+      border-bottom: 1px solid #eee;
+    }
+    .cart-item:last-child {
+      border-bottom: none;
+    }
+    .remove-btn {
+      background: #ff5252;
+      color: white;
+      border: none;
+      border-radius: 4px;
+      padding: 2px 6px;
+      font-size: 11px;
+      cursor: pointer;
+      width: auto;
+    }
+    .remove-btn:hover {
+      background: #ff1744;
+    }
     .price-info {
       background: #eef7fc;
       padding: 12px;
@@ -90,7 +122,7 @@
       justify-content: space-between;
       font-weight: bold;
     }
-    button {
+    button.primary-btn {
       width: 100%;
       padding: 12px;
       background: #2eaadc;
@@ -101,9 +133,17 @@
       font-size: 16px;
       cursor: pointer;
       transition: background 0.2s;
+      margin-top: 10px;
     }
-    button:hover {
+    button.primary-btn:hover {
       background: #2589b2;
+    }
+    button.secondary-btn {
+      background: #52c41a;
+      margin-top: 6px;
+    }
+    button.secondary-btn:hover {
+      background: #389e0d;
     }
     button:disabled {
       background: #ccc;
@@ -119,7 +159,7 @@
 </head>
 <body>
   <div class="card">
-    <h2>🛍️ DonPick 懂挑 | 線上預購/現貨下單系統</h2>
+    <h2>🛍️ DonPick 懂挑 | 線上預購/現貨購物車</h2>
     <form id="orderForm">
       
       <label>LINE社群暱稱</label>
@@ -134,8 +174,10 @@
         <input type="text" id="contactInfo" required placeholder="請輸入 ID 或帳號" style="width: 65%;">
       </div>
 
+      <hr style="margin: 20px 0; border: 0; border-top: 1px solid #eee;">
+
       <label>選擇商品</label>
-      <select id="productSelect" required>
+      <select id="productSelect">
         <option value="">載入商品中...</option>
       </select>
 
@@ -145,7 +187,20 @@
       </div>
 
       <label>數量</label>
-      <input type="number" id="quantity" value="1" min="1" required>
+      <input type="number" id="quantity" value="1" min="1">
+
+      <div style="font-size: 13px; color: #666; margin-top: 6px; text-align: right;">
+        單價：\$<span id="unitPrice">0</span>
+      </div>
+
+      <!-- 加入購物車按鈕 -->
+      <button type="button" class="primary-btn secondary-btn" id="addToCartBtn" onclick="addCurrentToCart()">➕ 加入購物車</button>
+
+      <!-- 購物車清單區塊 -->
+      <label style="margin-top: 20px;">🛒 已選購商品清單</label>
+      <div class="cart-section" id="cartContainer">
+        <div style="color: #888; font-size: 13px; text-align: center;" id="emptyCartText">目前購物車是空的，請上方選購商品</div>
+      </div>
 
       <label>取貨方式</label>
       <select id="deliverySelect" required>
@@ -154,11 +209,12 @@
       </select>
 
       <div class="price-info">
-        <span>單價：\$<span id="unitPrice">0</span></span>
-        <span>總金額：\$<span id="totalPrice">0</span></span>
+        <span>總計品項：<span id="cartCount">0</span> 樣</span>
+        <span>總金額：\$<span id="grandTotal">0</span></span>
       </div>
 
-      <button type="submit" id="btn">送出訂單</button>
+      <!-- 最終送出訂單按鈕 -->
+      <button type="submit" class="primary-btn" id="submitBtn">送出全部訂單</button>
     </form>
     <div id="msg"></div>
   </div>
@@ -166,6 +222,7 @@
   <script>
     let allProducts = [];
     let selectedStyle = null;
+    let cart = []; // 購物車陣列
 
     async function loadProducts() {
       const select = document.getElementById('productSelect');
@@ -185,7 +242,7 @@
         uniqueProductNames.forEach(name => {
           const opt = document.createElement('option');
           opt.value = name;
-          opt.textContent = name; // 選單後面不帶金額
+          opt.textContent = name;
           select.appendChild(opt);
         });
       } catch (e) {
@@ -199,7 +256,7 @@
       const container = document.getElementById('stylesContainer');
       container.innerHTML = '';
       selectedStyle = null;
-      updatePrice();
+      updateUnitPrice();
 
       if (!selectedProductName) {
         container.innerHTML = '<span style="color: #888; font-size: 13px;">請先選擇上方商品</span>';
@@ -231,7 +288,7 @@
           document.querySelectorAll('.style-card').forEach(c => c.classList.remove('selected'));
           card.classList.add('selected');
           selectedStyle = style;
-          updatePrice();
+          updateUnitPrice();
         };
 
         container.appendChild(card);
@@ -242,31 +299,21 @@
       });
     }
 
-    function updatePrice() {
-      const qty = parseInt(document.getElementById('quantity').value) || 1;
+    function updateUnitPrice() {
       if (selectedStyle) {
-        const price = selectedStyle.price || 0;
-        document.getElementById('unitPrice').innerText = price;
-        document.getElementById('totalPrice').innerText = price * qty;
+        document.getElementById('unitPrice').innerText = selectedStyle.price || 0;
       } else {
         document.getElementById('unitPrice').innerText = '0';
-        document.getElementById('totalPrice').innerText = '0';
       }
     }
 
-    document.getElementById('productSelect').addEventListener('change', onProductChange);
-    document.getElementById('quantity').addEventListener('input', updatePrice);
-
-    loadProducts();
-
-    document.getElementById('orderForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const btn = document.getElementById('btn');
-      const msg = document.getElementById('msg');
+    // 加入購物車動作
+    function addCurrentToCart() {
       const productName = document.getElementById('productSelect').value;
+      const qty = parseInt(document.getElementById('quantity').value) || 1;
 
       if (!productName) {
-        alert("請選擇商品！");
+        alert("請先選擇商品！");
         return;
       }
       if (!selectedStyle) {
@@ -274,21 +321,94 @@
         return;
       }
 
-      const qty = parseInt(document.getElementById('quantity').value) || 1;
+      // 檢查是否購物車已有同商品同款式，有則累加數量
+      const existingItem = cart.find(item => item.product === productName && item.spec === selectedStyle.styleName);
+      if (existingItem) {
+        existingItem.quantity += qty;
+        existingItem.totalPrice = existingItem.quantity * existingItem.price;
+      } else {
+        cart.push({
+          product: productName,
+          spec: selectedStyle.styleName,
+          price: selectedStyle.price,
+          quantity: qty,
+          totalPrice: selectedStyle.price * qty
+        });
+      }
+
+      renderCart();
+      // 重置數量欄位
+      document.getElementById('quantity').value = 1;
+    }
+
+    // 渲染購物車畫面
+    function renderCart() {
+      const container = document.getElementById('cartContainer');
+      const cartCountEl = document.getElementById('cartCount');
+      const grandTotalEl = document.getElementById('grandTotal');
+
+      if (cart.length === 0) {
+        container.innerHTML = '<div style="color: #888; font-size: 13px; text-align: center;" id="emptyCartText">目前購物車是空的，請上方選購商品</div>';
+        cartCountEl.innerText = '0';
+        grandTotalEl.innerText = '0';
+        return;
+      }
+
+      container.innerHTML = '';
+      let grandTotal = 0;
+
+      cart.forEach((item, index) => {
+        grandTotal += item.totalPrice;
+        container.innerHTML += `
+          <div class="cart-item">
+            <div>
+              <strong>${item.product}</strong> <br>
+              <span style="color:#666;">規格: ${item.spec} x ${item.quantity}</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="color:#2eaadc; font-weight:bold;">\$${item.totalPrice}</span>
+              <button type="button" class="remove-btn" onclick="removeFromCart(${index})">刪除</button>
+            </div>
+          </div>
+        `;
+      });
+
+      cartCountEl.innerText = cart.length;
+      grandTotalEl.innerText = grandTotal;
+    }
+
+    // 從購物車移除
+    function removeFromCart(index) {
+      cart.splice(index, 1);
+      renderCart();
+    }
+
+    document.getElementById('productSelect').addEventListener('change', onProductChange);
+
+    loadProducts();
+
+    // 最終送出表單
+    document.getElementById('orderForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('submitBtn');
+      const msg = document.getElementById('msg');
+
+      if (cart.length === 0) {
+        alert("您的購物車是空的，請先加入至少一項商品！");
+        return;
+      }
+
       btn.disabled = true;
       msg.style.color = '#555';
       msg.innerText = '⏳ 訂單傳送中，請稍候...';
 
+      // 組合要送給後端的資料（符合你剛才修改的 items 陣列結構）
       const data = {
         nickname: document.getElementById('nickname').value,
         contactType: document.getElementById('contactType').value,
         contactInfo: document.getElementById('contactInfo').value,
-        product: productName,
-        spec: selectedStyle.styleName, // 🌟 這裡改成只保留款式名稱，不加商品名
-        price: selectedStyle.price,
-        quantity: qty,
-        totalPrice: selectedStyle.price * qty,
-        delivery: document.getElementById('deliverySelect').value
+        delivery: document.getElementById('deliverySelect').value,
+        items: cart // 傳送整個購物車陣列
       };
 
       try {
@@ -299,9 +419,12 @@
         });
 
         if (res.ok) {
+          // 清空表單與購物車
           document.getElementById('orderForm').reset();
+          cart = [];
+          renderCart();
           selectedStyle = null;
-          updatePrice();
+          updateUnitPrice();
 
           msg.style.color = '#333';
           msg.innerHTML = `
