@@ -1,8 +1,8 @@
 import { Client } from '@notionhq/client';
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
-const DATABASE_ID = process.env.DATABASE_ID; // A 表 (主商品表) ID
-const PRODUCT_DETAIL_DB_ID = process.env.PRODUCT_DETAIL_DB_ID; // C 表 (款式細項表) ID
+const DATABASE_ID = process.env.PRODUCT_DB_ID; // 讀取 A 表 (主商品表)
+const PRODUCT_DETAIL_DB_ID = process.env.PRODUCT_DETAIL_DB_ID; // 讀取 C 表 (款式細項表)
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
