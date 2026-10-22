@@ -1,7 +1,7 @@
 import { Client } from '@notionhq/client';
 
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
-const DATABASE_ID = process.env.DATABASE_ID; // 你的 B 表（訂單資料庫）ID
+const DATABASE_ID = process.env.DATABASE_ID; // 讀取 B 表 (訂單資料庫)
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
