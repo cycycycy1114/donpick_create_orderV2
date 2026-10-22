@@ -5,6 +5,8 @@ const PRODUCT_DB_ID = process.env.PRODUCT_DB_ID || process.env.DATABASE_ID; // A
 const PRODUCT_DETAIL_DB_ID = process.env.PRODUCT_DETAIL_DB_ID; // C表 (款式細項表)
 
 export default async function handler(req, res) {
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+
   if (req.method !== 'GET') {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
@@ -12,7 +14,7 @@ export default async function handler(req, res) {
   try {
     const excludedStatuses = ['已結單', '已結束', '結束', '結單'];
 
-    // 1. 抓取 A 表 (主商品表)
+    // 1. 抓取 A 表 (主商品表) - 過濾已結單與已結束，並把 A 表的規格與價格記錄下來
     let aProducts = [];
     const aMapById = {};
     const aMapByName = {};
@@ -23,7 +25,7 @@ export default async function handler(req, res) {
         aResponse.results.forEach((page) => {
           const p = page.properties;
           
-          // 尋找可能的狀態欄位
+          // 檢查 A 表狀態是否需要被排除
           const statusProp = p['狀態'] || p['Status'] || p['訂單狀態'];
           let statusName = '';
           if (statusProp) {
@@ -33,7 +35,6 @@ export default async function handler(req, res) {
           }
           statusName = statusName.trim();
 
-          // 如果狀態符合排除清單，直接跳過
           if (excludedStatuses.some(ex => statusName.includes(ex))) {
             return;
           }
@@ -41,11 +42,15 @@ export default async function handler(req, res) {
           const nameProp = p['商品名稱'] || p['名稱'] || p['Name'];
           const name = nameProp?.title?.[0]?.plain_text || nameProp?.rich_text?.[0]?.plain_text || '';
           
+          // 讀取 A 表的規格欄位（備援用）
+          const specProp = p['規格'] || p['款式'] || p['Spec'];
+          const specName = specProp?.select?.name || specProp?.rich_text?.[0]?.plain_text || specProp?.title?.[0]?.plain_text || '標準款式';
+
           const priceProp = p['單價'] || p['價格'] || p['Price'];
           const price = priceProp?.number || 0;
 
           if (name) {
-            const item = { id: page.id, name, price };
+            const item = { id: page.id, name, spec: specName, price };
             aProducts.push(item);
             aMapById[page.id] = item;
             aMapByName[name] = item;
@@ -63,6 +68,11 @@ export default async function handler(req, res) {
         const cResponse = await notion.databases.query({ database_id: PRODUCT_DETAIL_DB_ID });
         cResponse.results.forEach((page) => {
           const p = page.properties;
+
+          // 檢查 C 表狀態是否需要被排除（選擇性防護）
+          const statusProp = p['狀態'] || p['Status'];
+          let statusName = statusProp?.status?.name || statusProp?.select?.name || '';
+          if (excludedStatuses.some(ex => statusName.includes(ex))) return;
 
           // 款式名稱
           const titleProp = p['款式名稱'] || p['名稱'] || p['Name'];
@@ -85,18 +95,22 @@ export default async function handler(req, res) {
           let matchedAId = null;
 
           const prodNameProp = p['商品名稱'] || p['商品'];
-          if (prodNameProp && prodNameProp.type === 'relation' && prodNameProp.relation.length > 0) {
-            matchedAId = prodNameProp.relation[0].id;
-            if (aMapById[matchedAId]) {
-              parentProductName = aMapById[matchedAId].name;
+          if (prodNameProp) {
+            if (prodNameProp.type === 'relation' && prodNameProp.relation.length > 0) {
+              matchedAId = prodNameProp.relation[0].id;
+              if (aMapById[matchedAId]) {
+                parentProductName = aMapById[matchedAId].name;
+              }
+            } else if (prodNameProp.type === 'select') {
+              parentProductName = prodNameProp.select?.name || '';
+            } else if (prodNameProp.type === 'rich_text') {
+              parentProductName = prodNameProp.rich_text?.[0]?.plain_text || '';
+            } else if (prodNameProp.type === 'title') {
+              parentProductName = prodNameProp.title?.[0]?.plain_text || '';
             }
-          } else if (prodNameProp) {
-            if (prodNameProp.type === 'select') parentProductName = prodNameProp.select?.name || '';
-            else if (prodNameProp.type === 'rich_text') parentProductName = prodNameProp.rich_text?.[0]?.plain_text || '';
-            else if (prodNameProp.type === 'title') parentProductName = prodNameProp.title?.[0]?.plain_text || '';
           }
 
-          // 只有當 A 表的主商品存在且未被排除時，才允許 C 表細項被撈出
+          // 只有當對應的 A 表主商品存在且未被排除時，才允許 C 表細項被撈出
           if (parentProductName && (aMapById[matchedAId] || aMapByName[parentProductName])) {
             cDetails.push({
               id: page.id,
@@ -121,15 +135,17 @@ export default async function handler(req, res) {
     aProducts.forEach(aItem => {
       const hasCDetails = matchedAIds.has(aItem.id) || matchedANames.has(aItem.name);
       if (hasCDetails) {
+        // 如果 C 表有細項，載入 C 表的款式與圖片
         const styles = cDetails.filter(c => c.matchedAId === aItem.id || c.productName === aItem.name);
         finalProducts.push(...styles);
       } else {
+        // 如果 C 表沒有細項，自動備援使用 A 表的規格與價格（無圖片）
         finalProducts.push({
           id: aItem.id,
           productName: aItem.name,
-          styleName: '標準款式',
+          styleName: aItem.spec, // 採用 A 表的規格
           price: aItem.price,
-          imageUrl: ''
+          imageUrl: '' // 無圖片
         });
       }
     });
