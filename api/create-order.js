@@ -24,43 +24,43 @@ export default async function handler(req, res) {
     const response = await notion.pages.create({
       parent: { database_id: DATABASE_ID },
       properties: {
-        // 買家暱稱 (Title 欄位)
+        // 1. 買家暱稱 (請確認 B 表第一欄 Title 欄位的實際名稱)
         "買家暱稱": {
           title: [
             { text: { content: nickname } }
           ]
         },
-        // 聯絡方式 (Rich Text 欄位)
+        // 2. 聯絡方式 (請確認 B 表是否有這個欄位)
         "聯絡方式": {
           rich_text: [
             { text: { content: contactFull } }
           ]
         },
-        // 商品/規格 (Rich Text 欄位，會記錄如: 韓國帆布袋 - 奶茶色)
+        // 🌟 3. 規格：因為 Notion 規定它是 Select，所以要改用 select 格式傳送
         "規格": {
-          rich_text: [
-            { text: { content: spec } }
-          ]
+          select: {
+            name: spec || "預設規格" // 請確保傳進去的規格文字，有存在於 Notion 該欄位的選項中！
+          }
         },
-        // 數量 (Number 欄位)
+        // 4. 數量
         "數量": {
           number: Number(quantity) || 1
         },
-        // 單價 (Number 欄位)
+        // 5. 單價 (請確認 B 表欄位是否叫這個名字)
         "單價": {
           number: Number(price) || 0
         },
-        // 總金額 (Number 欄位)
+        // 6. 總金額
         "總金額": {
           number: Number(totalPrice) || 0
         },
-        // 取貨方式 (Select 欄位)
+        // 7. 取貨方式
         "取貨方式": {
           select: {
             name: delivery || "7-11 店到店"
           }
         },
-        // 訂單狀態 (Status 或 Select 欄位)
+        // 8. 狀態 (請確認 B 表欄位是 Status 或 Select 型態)
         "狀態": {
           status: {
             name: "待處理"
