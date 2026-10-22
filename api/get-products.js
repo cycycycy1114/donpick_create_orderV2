@@ -10,9 +10,9 @@ export default async function handler(req, res) {
   }
 
   try {
-    const excludedStatuses = ['已結單', '已結束'];
+    const excludedStatuses = ['已結單', '已結束', '結束', '結單'];
 
-    // 1. 抓取 A 表 (主商品表) - 以 A 表的狀態為主來判斷是否「已結束」或「已結單」
+    // 1. 抓取 A 表 (主商品表)
     let aProducts = [];
     const aMapById = {};
     const aMapByName = {};
@@ -23,10 +23,20 @@ export default async function handler(req, res) {
         aResponse.results.forEach((page) => {
           const p = page.properties;
           
-          // 檢查 A 表狀態：如果是已結單或已結束，直接略過不撈取
-          const statusProp = p['狀態'] || p['Status'];
-          const statusName = statusProp?.status?.name || statusProp?.select?.name || '';
-          if (excludedStatuses.includes(statusName)) return;
+          // 尋找可能的狀態欄位
+          const statusProp = p['狀態'] || p['Status'] || p['訂單狀態'];
+          let statusName = '';
+          if (statusProp) {
+            if (statusProp.type === 'status') statusName = statusProp.status?.name || '';
+            else if (statusProp.type === 'select') statusName = statusProp.select?.name || '';
+            else if (statusProp.type === 'rich_text') statusName = statusProp.rich_text?.[0]?.plain_text || '';
+          }
+          statusName = statusName.trim();
+
+          // 如果狀態符合排除清單，直接跳過
+          if (excludedStatuses.some(ex => statusName.includes(ex))) {
+            return;
+          }
 
           const nameProp = p['商品名稱'] || p['名稱'] || p['Name'];
           const name = nameProp?.title?.[0]?.plain_text || nameProp?.rich_text?.[0]?.plain_text || '';
@@ -86,8 +96,7 @@ export default async function handler(req, res) {
             else if (prodNameProp.type === 'title') parentProductName = prodNameProp.title?.[0]?.plain_text || '';
           }
 
-          // 核心邏輯：「已結束以 A 表為主」
-          // 只有當這個 C 表細項對應到的 A 表主商品存在且未被過濾（也就是 A表 是開放狀態），才允許撈進來
+          // 只有當 A 表的主商品存在且未被排除時，才允許 C 表細項被撈出
           if (parentProductName && (aMapById[matchedAId] || aMapByName[parentProductName])) {
             cDetails.push({
               id: page.id,
@@ -120,7 +129,7 @@ export default async function handler(req, res) {
           productName: aItem.name,
           styleName: '標準款式',
           price: aItem.price,
-          imageUrl: '' // 無圖片
+          imageUrl: ''
         });
       }
     });
