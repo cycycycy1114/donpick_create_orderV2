@@ -17,51 +17,58 @@ export default async function handler(req, res) {
       return res.status(500).json({ success: false, error: "缺少 DATABASE_ID 環境變數" });
     }
 
-    // 🌟 請把左側的引號名稱（例如 "Name", "聯絡方式" 等）改成你 Notion B 表實際建立的欄位名稱！
-    const properties = {
-      // 1. 第一欄標題 (Title)，通常是買家暱稱或訂單名稱
-      "Name": {
-        title: [{ text: { content: nickname || '未命名買家' } }]
-      },
-      // 2. 聯絡管道 (如果是 Select 選單就用 select，若是文字就改 rich_text)
-      "聯絡管道": {
-        select: { name: contactType || 'Line' }
-      },
-      // 3. 聯絡資訊
-      "聯絡資訊": {
-        rich_text: [{ text: { content: contactInfo || '' } }]
-      },
-      // 4. 商品名稱
-      "商品名稱": {
-        rich_text: [{ text: { content: product || '' } }]
-      },
-      // 5. 規格
-      "規格": {
-        select: { name: spec || '預設規格' }
-      },
-      // 6. 數量
-      "數量": {
-        number: Number(quantity) || 1
-      },
-      // 7. 單價
-      "單價": {
-        number: Number(price) || 0
-      },
-      // 8. 總金額
-      "總金額": {
-        number: Number(totalPrice) || 0
-      },
-      // 9. 取貨方式
-      "取貨方式": {
-        select: { name: delivery || '7-11 店到店' }
-      },
-      // 10. 狀態 (若 Notion 是 status 型態用 status，若是 select 用 select)
-      "狀態": {
-        status: { name: '待處理' }
+    // 1. 動態取得 B 資料庫現有的真實結構
+    const dbInfo = await notion.databases.retrieve({ database_id: dbId });
+    const propsSchema = dbInfo.properties;
+
+    const properties = {};
+
+    // 2. 智慧對應函式：自動尋找相符的欄位名稱與型態
+    const setProp = (possibleNames, val, overrideType = null) => {
+      const propKey = Object.keys(propsSchema).find(k =>
+        possibleNames.some(p => k.trim().toLowerCase() === p.trim().toLowerCase())
+      );
+
+      if (!propKey) {
+        console.warn(`⚠️ 找不到對應的欄位，可能的名稱為: ${possibleNames.join(', ')}`);
+        return;
+      }
+
+      const propType = overrideType || propsSchema[propKey].type;
+      const strVal = String(val !== undefined && val !== null ? val : '');
+
+      if (propType === 'title') {
+        properties[propKey] = { title: [{ text: { content: strVal || '未命名買家' } }] };
+      } else if (propType === 'rich_text') {
+        properties[propKey] = { rich_text: [{ text: { content: strVal } }] };
+      } else if (propType === 'select') {
+        if (strVal) properties[propKey] = { select: { name: strVal } };
+      } else if (propType === 'status') {
+        if (strVal) properties[propKey] = { status: { name: strVal } };
+      } else if (propType === 'number') {
+        properties[propKey] = { number: Number(val) || 0 };
       }
     };
 
-    // 寫入 Notion
+    // 3. 把你所有可能的中文/英文欄位名稱列在這邊，程式會自動去對應 Notion 裡真實存在的欄位
+    setProp(['買家暱稱', '訂單', '訂單名稱', '暱稱', 'LINE社群暱稱', 'Name', 'Title'], nickname || '未命名買家');
+    setProp(['聯絡管道', '聯絡方式', '聯絡型態', '管道'], contactType);
+    setProp(['聯絡資訊', '聯絡帳號', 'LINE ID/IG', '帳號', '聯絡內容'], contactInfo);
+    setProp(['商品名稱', '商品', '品項', '預購商品', 'Product'], product);
+    setProp(['規格', '款式', 'Spec'], spec);
+    setProp(['數量', '購買數量', 'Quantity'], quantity);
+    setProp(['單價', '價格', 'Price'], price);
+    setProp(['總金額', '總價', '合計', 'Total Price', '金額'], totalPrice);
+    setProp(['取貨方式', '寄送方式', '物流', 'Delivery'], delivery);
+    setProp(['狀態', '訂單狀態', 'Status'], '待處理');
+
+    // 🛡️ 安全機制：如果自動對應沒找到 Title 欄位，強制把資料庫第一個 Title 欄位填上
+    const titleKey = Object.keys(propsSchema).find(k => propsSchema[k].type === 'title');
+    if (titleKey && !properties[titleKey]) {
+      properties[titleKey] = { title: [{ text: { content: nickname || '未命名訂單' } }] };
+    }
+
+    // 4. 寫入 Notion
     await notion.pages.create({
       parent: { database_id: dbId },
       properties: properties
