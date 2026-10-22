@@ -1,23 +1,24 @@
-const { Client } = require('@notionhq/client');
+import { Client } from '@notionhq/client';
+
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
-module.exports = async (req, res) => {
-  // 確保無論如何都回傳 JSON 格式
-  res.setHeader('Content-Type', 'application/json');
+export default async function handler(req, res) {
+  // 強制設定 Content-Type 為 JSON，防止 Vercel 回傳純文字 HTML 頁面
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
 
   if (req.method !== 'POST') {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
   try {
-    const { nickname, contactType, contactInfo, product, price, quantity, totalPrice, spec, delivery } = req.body;
+    const { nickname, contactType, contactInfo, product, price, quantity, totalPrice, spec, delivery } = req.body || {};
     const dbId = process.env.DATABASE_ID;
 
     if (!dbId) {
       return res.status(500).json({ success: false, error: "缺少 DATABASE_ID 環境變數" });
     }
 
-    // 建立寫入 Notion B 表的屬性對應（請確保 B 表欄位名稱與此處相符）
+    // 建立寫入 Notion B 表的屬性對應
     const properties = {
       // 1. 買家暱稱 (Title 欄位)
       "買家暱稱": {
@@ -35,7 +36,7 @@ module.exports = async (req, res) => {
       "商品名稱": {
         rich_text: [{ text: { content: product || '' } }]
       },
-      // 5. 規格 (如果你的 Notion 是 Select 型態，這裡用 select；若是文字，可改 rich_text)
+      // 5. 規格
       "規格": {
         select: { name: spec || '預設規格' }
       },
@@ -70,8 +71,8 @@ module.exports = async (req, res) => {
     return res.status(200).json({ success: true, message: 'Success' });
 
   } catch (error) {
-    console.error("Notion 寫入詳細錯誤:", error.body || error.message);
-    const errorMsg = error.body ? JSON.stringify(error.body) : error.message;
+    console.error("Notion 寫入詳細錯誤:", error);
+    const errorMsg = error.body ? JSON.stringify(error.body) : (error.message || String(error));
     return res.status(500).json({ success: false, error: errorMsg });
   }
-};
+}
