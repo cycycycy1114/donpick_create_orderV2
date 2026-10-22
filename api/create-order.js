@@ -50,7 +50,7 @@ export default async function handler(req, res) {
       }
     };
 
-    // 3. 把你所有可能的中文/英文欄位名稱列在這邊，程式會自動去對應 Notion 裡真實存在的欄位
+    // 3. 對應各欄位資料
     setProp(['買家暱稱', '訂單', '訂單名稱', '暱稱', 'LINE社群暱稱', 'Name', 'Title'], nickname || '未命名買家');
     setProp(['聯絡管道', '聯絡方式', '聯絡型態', '管道'], contactType);
     setProp(['聯絡資訊', '聯絡帳號', 'LINE ID/IG', '帳號', '聯絡內容'], contactInfo);
@@ -60,7 +60,10 @@ export default async function handler(req, res) {
     setProp(['單價', '價格', 'Price'], price);
     setProp(['總金額', '總價', '合計', 'Total Price', '金額'], totalPrice);
     setProp(['取貨方式', '寄送方式', '物流', 'Delivery'], delivery);
-    setProp(['狀態', '訂單狀態', 'Status'], '待處理');
+    
+    // 🌟 新增：分別寫入物流狀態與金流狀態（預設分別為「備貨中」與「未付款」）
+    setProp(['物流狀態', '出貨狀態'], '備貨中');
+    setProp(['金流狀態', '付款狀態'], '未付款');
 
     // 🛡️ 安全機制：如果自動對應沒找到 Title 欄位，強制把資料庫第一個 Title 欄位填上
     const titleKey = Object.keys(propsSchema).find(k => propsSchema[k].type === 'title');
