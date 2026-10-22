@@ -2,8 +2,11 @@ const { Client } = require('@notionhq/client');
 const notion = new Client({ auth: process.env.NOTION_TOKEN });
 
 module.exports = async (req, res) => {
+  // 確保無論如何都回傳 JSON 格式
+  res.setHeader('Content-Type', 'application/json');
+
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+    return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
   try {
@@ -11,71 +14,64 @@ module.exports = async (req, res) => {
     const dbId = process.env.DATABASE_ID;
 
     if (!dbId) {
-      throw new Error("缺少 DATABASE_ID 環境變數");
+      return res.status(500).json({ success: false, error: "缺少 DATABASE_ID 環境變數" });
     }
 
-    // 1. 取得 B 資料庫結構
-    const dbInfo = await notion.databases.retrieve({ database_id: dbId });
-    const propsSchema = dbInfo.properties;
-
-    // 在 Vercel 後端日誌印出目前 Notion 資料庫裡有的真實欄位名稱與型態，方便我們對照
-    console.log("Notion 資料庫現有欄位結構：", JSON.stringify(Object.keys(propsSchema).map(k => ({ name: k, type: propsSchema[k].type }))));
-
-    const properties = {};
-
-    const setProp = (possibleNames, val) => {
-      const propKey = Object.keys(propsSchema).find(k =>
-        possibleNames.some(p => k.trim().toLowerCase() === p.trim().toLowerCase())
-      );
-
-      if (!propKey) {
-        console.warn(`⚠️ 找不到對應的欄位，可能的名稱為: ${possibleNames.join(', ')}`);
-        return;
-      }
-
-      const propType = propsSchema[propKey].type;
-      const strVal = String(val !== undefined && val !== null ? val : '');
-
-      if (propType === 'title') {
-        properties[propKey] = { title: [{ text: { content: strVal || '未命名訂單' } }] };
-      } else if (propType === 'rich_text') {
-        properties[propKey] = { rich_text: [{ text: { content: strVal } }] };
-      } else if (propType === 'select') {
-        if (strVal) properties[propKey] = { select: { name: strVal } };
-      } else if (propType === 'status') {
-        if (strVal) properties[propKey] = { status: { name: strVal } };
-      } else if (propType === 'number') {
-        properties[propKey] = { number: Number(val) || 0 };
+    // 建立寫入 Notion B 表的屬性對應（請確保 B 表欄位名稱與此處相符）
+    const properties = {
+      // 1. 買家暱稱 (Title 欄位)
+      "買家暱稱": {
+        title: [{ text: { content: nickname || '未命名買家' } }]
+      },
+      // 2. 聯絡管道
+      "聯絡管道": {
+        rich_text: [{ text: { content: contactType || '' } }]
+      },
+      // 3. 聯絡資訊
+      "聯絡資訊": {
+        rich_text: [{ text: { content: contactInfo || '' } }]
+      },
+      // 4. 商品名稱
+      "商品名稱": {
+        rich_text: [{ text: { content: product || '' } }]
+      },
+      // 5. 規格 (如果你的 Notion 是 Select 型態，這裡用 select；若是文字，可改 rich_text)
+      "規格": {
+        select: { name: spec || '預設規格' }
+      },
+      // 6. 數量
+      "數量": {
+        number: Number(quantity) || 1
+      },
+      // 7. 單價
+      "單價": {
+        number: Number(price) || 0
+      },
+      // 8. 總金額
+      "總金額": {
+        number: Number(totalPrice) || 0
+      },
+      // 9. 取貨方式
+      "取貨方式": {
+        select: { name: delivery || '7-11 店到店' }
+      },
+      // 10. 狀態
+      "狀態": {
+        status: { name: '待處理' }
       }
     };
 
-    // 2. 對應欄位
-    setProp(['訂單', '訂單名稱', '暱稱', '買家暱稱', 'LINE社群暱稱', 'Name', 'Title'], nickname || '未命名買家');
-    setProp(['聯絡管道', '聯絡方式', '聯絡型態', '管道'], contactType);
-    setProp(['聯絡資訊', '聯絡帳號', 'LINE ID/IG', '帳號', '聯絡內容'], contactInfo);
-    setProp(['商品名稱', '商品', '品項', '預購商品', 'Product'], product);
-    setProp(['規格', '款式', 'Spec'], spec);
-    setProp(['數量', '購買數量', 'Quantity'], quantity);
-    setProp(['單價', '價格', 'Price'], price);
-    setProp(['總金額', '總價', '合計', 'Total Price', '金額'], totalPrice);
-    setProp(['取貨方式', '寄送方式', '物流', 'Delivery'], delivery);
-    setProp(['狀態', '訂單狀態', 'Status'], '待處理');
-
-    // 🛡️ 安全機制：如果自動對應沒找到 Title 欄位，手動強制把資料庫第一個 Title 欄位填上，避免 Notion 報錯
-    const titleKey = Object.keys(propsSchema).find(k => propsSchema[k].type === 'title');
-    if (titleKey && !properties[titleKey]) {
-      properties[titleKey] = { title: [{ text: { content: nickname || '未命名訂單' } }] };
-    }
-
-    // 3. 寫入 Notion
+    // 寫入 Notion
     await notion.pages.create({
       parent: { database_id: dbId },
       properties: properties
     });
 
-    res.status(200).json({ message: 'Success' });
+    return res.status(200).json({ success: true, message: 'Success' });
+
   } catch (error) {
     console.error("Notion 寫入詳細錯誤:", error.body || error.message);
-    res.status(500).json({ error: error.body ? JSON.stringify(error.body) : error.message });
+    const errorMsg = error.body ? JSON.stringify(error.body) : error.message;
+    return res.status(500).json({ success: false, error: errorMsg });
   }
 };
