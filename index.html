@@ -284,7 +284,7 @@
         contactType: document.getElementById('contactType').value,
         contactInfo: document.getElementById('contactInfo').value,
         product: productName,
-        spec: `${productName} - ${selectedStyle.styleName}`,
+        spec: selectedStyle.styleName, // 🌟 這裡改成只保留款式名稱，不加商品名
         price: selectedStyle.price,
         quantity: qty,
         totalPrice: selectedStyle.price * qty,
