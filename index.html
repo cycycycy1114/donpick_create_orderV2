@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DonPick 懂挑 | 預購下單表單</title>
+  <style>
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      padding: 20px;
+      background: #f7f6f3;
+      color: #37352f;
+      margin: 0;
+    }
+    .card {
+      background: white;
+      padding: 24px;
+      border-radius: 12px;
+      max-width: 480px;
+      margin: 20px auto;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+    h2 {
+      margin-top: 0;
+      font-size: 20px;
+      text-align: center;
+      color: #2eaadc;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin: 14px 0 6px;
+      font-weight: 600;
+      font-size: 14px;
+    }
+    input, select {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid #e0e0e0;
+      border-radius: 6px;
+      box-sizing: border-box;
+      font-size: 14px;
+      background: #fff;
+    }
+    input:focus, select:focus {
+      outline: none;
+      border-color: #2eaadc;
+    }
+    .contact-group {
+      display: flex;
+      gap: 8px;
+    }
+    .styles-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      gap: 10px;
+      margin-top: 8px;
+    }
+    .style-card {
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      padding: 8px;
+      text-align: center;
+      cursor: pointer;
+      background: #fafafa;
+      transition: all 0.2s;
+    }
+    .style-card:hover {
+      border-color: #2eaadc;
+    }
+    .style-card.selected {
+      border-color: #2eaadc;
+      background: #eef7fc;
+    }
+    .style-card img {
+      width: 100%;
+      height: 90px;
+      object-fit: cover;
+      border-radius: 6px;
+      background: #eee;
+    }
+    .price-info {
+      background: #eef7fc;
+      padding: 12px;
+      border-radius: 6px;
+      margin: 18px 0;
+      font-size: 14px;
+      color: #0066cc;
+      display: flex;
+      justify-content: space-between;
+      font-weight: bold;
+    }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #2eaadc;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 16px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover {
+      background: #2589b2;
+    }
+    button:disabled {
+      background: #ccc;
+      cursor: not-allowed;
+    }
+    #msg {
+      margin-top: 14px;
+      text-align: center;
+      font-weight: bold;
+      font-size: 14px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>🛍️ DonPick 懂挑 | 線上預購/現貨下單系統</h2>
+    <form id="orderForm">
+      
+      <label>LINE社群暱稱</label>
+      <input type="text" id="nickname" required placeholder="例如：小明">
+
+      <label>聯絡方式</label>
+      <div class="contact-group">
+        <select id="contactType" style="width: 35%;">
+          <option value="LINE ID">LINE ID</option>
+          <option value="IG 帳號">IG 帳號</option>
+        </select>
+        <input type="text" id="contactInfo" required placeholder="請輸入 ID 或帳號" style="width: 65%;">
+      </div>
+
+      <label>選擇商品</label>
+      <select id="productSelect" required>
+        <option value="">載入商品中...</option>
+      </select>
+
+      <label>選擇款式 / 規格</label>
+      <div id="stylesContainer" class="styles-grid">
+        <span style="color: #888; font-size: 13px;">請先選擇上方商品</span>
+      </div>
+
+      <label>數量</label>
+      <input type="number" id="quantity" value="1" min="1" required>
+
+      <label>取貨方式</label>
+      <select id="deliverySelect" required>
+        <option value="7-11 店到店">7-11 店到店</option>
+        <option value="面交">面交</option>
+      </select>
+
+      <div class="price-info">
+        <span>單價：\$<span id="unitPrice">0</span></span>
+        <span>總金額：\$<span id="totalPrice">0</span></span>
+      </div>
+
+      <button type="submit" id="btn">送出訂單</button>
+    </form>
+    <div id="msg"></div>
+  </div>
+
+  <script>
+    let allProducts = [];
+    let selectedStyle = null;
+
+    async function loadProducts() {
+      const select = document.getElementById('productSelect');
+      try {
+        const res = await fetch('/api/get-products');
+        const data = await res.json();
+        allProducts = data.products || data;
+
+        if (!Array.isArray(allProducts) || allProducts.length === 0) {
+          select.innerHTML = '<option value="">目前無商品可供選擇</option>';
+          return;
+        }
+
+        const uniqueProductNames = [...new Set(allProducts.map(p => p.productName))];
+
+        select.innerHTML = '<option value="">請選擇商品...</option>';
+        uniqueProductNames.forEach(name => {
+          const opt = document.createElement('option');
+          opt.value = name;
+          opt.textContent = name; // 選單後面不帶金額
+          select.appendChild(opt);
+        });
+      } catch (e) {
+        console.error("載入商品失敗:", e);
+        select.innerHTML = '<option value="">商品載入失敗</option>';
+      }
+    }
+
+    function onProductChange() {
+      const selectedProductName = document.getElementById('productSelect').value;
+      const container = document.getElementById('stylesContainer');
+      container.innerHTML = '';
+      selectedStyle = null;
+      updatePrice();
+
+      if (!selectedProductName) {
+        container.innerHTML = '<span style="color: #888; font-size: 13px;">請先選擇上方商品</span>';
+        return;
+      }
+
+      const matchedStyles = allProducts.filter(p => p.productName === selectedProductName);
+
+      if (matchedStyles.length === 0) {
+        container.innerHTML = '<span style="color: #888; font-size: 13px;">此商品目前無款式細項</span>';
+        return;
+      }
+
+      matchedStyles.forEach((style, idx) => {
+        const card = document.createElement('div');
+        card.className = 'style-card';
+        
+        const imgTag = style.imageUrl 
+          ? `<img src="${style.imageUrl}" alt="${style.styleName}">` 
+          : `<div style="height:90px; background:#e0e0e0; border-radius:6px; display:flex; align-items:center; justify-content:center; font-size:12px; color:#666;">無圖片</div>`;
+
+        card.innerHTML = `
+          ${imgTag}
+          <div style="font-size: 13px; font-weight: bold; margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${style.styleName}</div>
+          <div style="font-size: 12px; color: #2eaadc; margin-top: 2px;">$${style.price}</div>
+        `;
+
+        card.onclick = () => {
+          document.querySelectorAll('.style-card').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
+          selectedStyle = style;
+          updatePrice();
+        };
+
+        container.appendChild(card);
+
+        if (idx === 0) {
+          card.click();
+        }
+      });
+    }
+
+    function updatePrice() {
+      const qty = parseInt(document.getElementById('quantity').value) || 1;
+      if (selectedStyle) {
+        const price = selectedStyle.price || 0;
+        document.getElementById('unitPrice').innerText = price;
+        document.getElementById('totalPrice').innerText = price * qty;
+      } else {
+        document.getElementById('unitPrice').innerText = '0';
+        document.getElementById('totalPrice').innerText = '0';
+      }
+    }
+
+    document.getElementById('productSelect').addEventListener('change', onProductChange);
+    document.getElementById('quantity').addEventListener('input', updatePrice);
+
+    loadProducts();
+
+    document.getElementById('orderForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const btn = document.getElementById('btn');
+      const msg = document.getElementById('msg');
+      const productName = document.getElementById('productSelect').value;
+
+      if (!productName) {
+        alert("請選擇商品！");
+        return;
+      }
+      if (!selectedStyle) {
+        alert("請選擇商品款式！");
+        return;
+      }
+
+      const qty = parseInt(document.getElementById('quantity').value) || 1;
+      btn.disabled = true;
+      msg.style.color = '#555';
+      msg.innerText = '⏳ 訂單傳送中，請稍候...';
+
+      const data = {
+        nickname: document.getElementById('nickname').value,
+        contactType: document.getElementById('contactType').value,
+        contactInfo: document.getElementById('contactInfo').value,
+        product: productName,
+        spec: `${productName} - ${selectedStyle.styleName}`,
+        price: selectedStyle.price,
+        quantity: qty,
+        totalPrice: selectedStyle.price * qty,
+        delivery: document.getElementById('deliverySelect').value
+      };
+
+      try {
+        const res = await fetch('/api/create-order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+
+        if (res.ok) {
+          document.getElementById('orderForm').reset();
+          selectedStyle = null;
+          updatePrice();
+
+          msg.style.color = '#333';
+          msg.innerHTML = `
+            <div style="text-align: center; padding: 15px; line-height: 1.6; background: #fdfdfd; border: 2px dashed #4CAF50; border-radius: 10px; margin-top: 15px;">
+              <h3 style="color: #2e7d32; margin-top: 0;">🎉 預購下單成功！感謝您的訂購！</h3>
+              <p style="font-size: 15px; font-weight: bold; color: #d32f2f;">📸 【請先將此畫面「截圖」保存】</p>
+              <p style="font-size: 14px;">請點擊下方連結私訊我們的 LINE 官方帳號，將截圖傳給我們，並發送您的 <strong>「LINE 社群暱稱」</strong>！</p>
+              <hr style="margin: 15px 0; border: 0; border-top: 1px solid #eee;">
+              <div style="text-align: left; background: #f9f9f9; padding: 12px; border-radius: 6px; font-size: 13px; color: #555;">
+                💡 <strong>溫馨提醒：</strong><br>
+                1. 若需付款訂金，請於 <strong>24小時內</strong> 私訊官方 LINE，以取得匯款帳號與金額。<br>
+                2. 等我們確認採買成功後，會第一時間在 LINE 私訊您匯款帳號與金額（尾款）；若不幸缺貨/斷貨，也會私訊通知您喔！
+              </div>
+              <br>
+              <p style="margin-bottom: 5px;">💬 <strong>【如何與我們保持聯繫？】</strong></p>
+              <p style="margin: 5px 0;">🔗 點擊加入 LINE 官方帳號：<br>
+              <a href="https://lin.ee/9RRJHKL" target="_blank" style="color: #06c755; font-weight: bold; font-size: 16px; text-decoration: none;">👉 https://lin.ee/9RRJHKL</a></p>
+              <p style="margin-top: 5px;">🔍 或使用 LINE 搜尋 ID 加好友：<br>
+              <strong style="color: #333; font-size: 15px;">@122dbekb</strong>（記得要加 @ 符號喔！）</p>
+            </div>
+          `;
+        } else {
+          const errData = await res.json();
+          throw new Error(errData.error || '下單失敗');
+        }
+      } catch (err) {
+        msg.style.color = 'red';
+        msg.innerText = '❌ ' + err.message;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>
